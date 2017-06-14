@@ -63,8 +63,67 @@ runtime系统是由定义在`/usr/include/objc`文件中的一些方法和数据
 当一个新的对象被创建,内存中会创建空间,初始化它的实例变量.在对象变量最开始是一个指向类结构的一个指针.这个指针叫做 `isa`指针,通过这个指针可以访问本身类和父类.
 
 
+![](https://developer.apple.com/library/content/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Art/messaging1.gif)
+
+当向一个对象发送一个消息的时候, 消息的方法会根据`isa`指针找到类的结构,并在类结构中的分发表里寻找方法选择器.如果没有找到, `objc_msgSend`方法会沿着`isa`指针找到父类,继续查找,一直到`NSObject`类, 在查找过程中, 一旦找到了, 就会停止查找并调用方法选择器.
+
+这是在运行时选择方法实现的方式，或者用面向对象编程的行话来说，方法是动态绑定到消息的。
+
+为了加速消息处理, runtime系统缓存了使用过的方法选择器和方法地址.因为是针对不同的类做缓存,所以也保存了从父类继承的方法选择器.在寻找类的分发表之前, 消息程序会先检测缓存. 如果方法选择器位于缓存中，消息传递只比函数调用稍微慢一点. 当程序运行了一段时间后, 几乎所有的消息都会在缓存中找到. 缓存的增加.
 
 
+#### 使用隐藏参数
 
+当`objc_msgSend`查找一个方法的实现, 并调用方法实现的时候,不仅传入了所有消息中的参数,还传入了两个隐藏的参数:
 
+- 消息的接收者
+- 方法的选择器
+
+这些参数为每个方法实现了调用它的消息表达式的两部分的显式信息.之所以成为隐藏的参数是因为他们没有在源代码里面声明.他们是在编译器编译代码的时候插入的.
+
+尽管这些参数没有显示声明, 源代码仍然可以引用它们,使用`self`标识消息接收者, `_cmd`表示方法选择器. 在下面的例子,`_cmd`代表 `strange`方法, `self`代表接收`strange`方法的接收者.
+
+```
+- strange
+{
+    id  target = getTheReceiver();
+    SEL method = getTheMethod();
  
+    if ( target == self || method == _cmd )
+        return nil;
+    return [target performSelector:method];
+}
+```
+
+`self`是在两个参数中更有用一些.实际意义是,它一种让消息接收者的实例变量可以在方法实现里可以使用的一种方法.
+
+### 获取一个方法的地址
+
+绕过动态绑定的唯一方法就是获取一个方法的地址,然后直接调用它.这可能是在罕见的情况下，当一个特定方法连续多次执行时，您希望在每次执行方法时避免消息传递的开销.
+
+在`NSObject`类中定义的方法`methodForSelector :`可以获取一个方法实现的指针,然后用这个指针可以调用方法,这个方法返回的指针必须小心地将其转换为适当的函数类型, 返回值和参数的类型必须包含在cast.
+
+下面的例子展示了如何调用`setFilled:`方法:
+
+```
+void (*setter)(id, SEL, BOOL);
+int i;
+ 
+setter = (void (*)(id, SEL, BOOL))[target
+    methodForSelector:@selector(setFilled:)];
+for ( i = 0 ; i < 1000 ; i++ )
+    setter(targetList[i], @selector(setFilled:), YES);
+```
+
+前两个参数是接收者和方法选择器,这些参数在方法里是隐藏的, 但是当一个方法被叫做函数的时候需要显示指定.
+
+使用`methodForSelector :`方法可以避免动态绑定, 节约很多时间.但是，只有在特定的消息重复多次的情况下，节省才会有意义，就像上面所示的for循环一样. 
+
+注意方法`methodForSelector :`是通过Cocoa的runtime系统提供的, 它不是Objective-C语言的功能.
+ 
+### 动态方法解析
+
+#### 解析
+
+
+#### 动态加载
