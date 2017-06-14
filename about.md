@@ -4,12 +4,30 @@ title: About
 permalink: /about/
 ---
 
-This is the base Jekyll theme. You can find out more info about customizing your Jekyll theme, as well as basic Jekyll usage documentation at [jekyllrb.com](http://jekyllrb.com/)
+### 个人成长:
 
-You can find the source code for the Jekyll new theme at:
-{% include icon-github.html username="jekyll" %} /
-[minima](https://github.com/jekyll/minima)
+- iOS开发
 
-You can find the source code for Jekyll at
-{% include icon-github.html username="jekyll" %} /
-[jekyll](https://github.com/jekyll/jekyll)
+	* 技术文档
+	* 源码解读
+	* 面试题积累
+	* 开发中问题积累
+	
+- 关注技术分享
+- 算法
+- 语言 Javascript, Python
+- 新技术
+
+### 项目贡献:
+
+- Router
+
+	* 支持多分支切换
+	* 控制内存, 重用VC
+	* 错误处理
+	
+- React Native
+
+	* 搭建框架
+	
+- 其他从需求中总结可设计实现的
