@@ -115,9 +115,179 @@ int objc_sync_enter(id obj)
 }
 ```
 
-`objc_sync_enter`方法做了一件事情,就是根据参数进行加锁。
+`objc_sync_enter`方法做了一件事情,就是根据参数进行加锁。那么它是如何进行加锁的呢? 我们继续往下看。
 
-接下来看一下`SyncData`数据结构, 使用了`os_unfair_lock`互斥锁(这里老版本runtime使用的是`OSSpinLock`自旋锁)
+这里通过`id2data(id object, enum usage why)`方法来获取`SyncData`一个节点数据, 方法里根据`obj`参数来查找Cache对象,当然没有命中cache的时候会创建并存cache,接下来看具体查找缓存的过程。
+
+**objc-sync.mm**
+
+```
+static SyncData* id2data(id object, enum usage why)
+{
+    spinlock_t *lockp = &LOCK_FOR_OBJ(object);
+    SyncData **listp = &LIST_FOR_OBJ(object);
+    SyncData* result = NULL;
+
+#if SUPPORT_DIRECT_THREAD_KEYS
+    // Check per-thread single-entry fast cache for matching object
+    bool fastCacheOccupied = NO;
+    SyncData *data = (SyncData *)tls_get_direct(SYNC_DATA_DIRECT_KEY);
+    if (data) {
+        fastCacheOccupied = YES;
+
+        if (data->object == object) {
+            // Found a match in fast cache.
+            uintptr_t lockCount;
+
+            result = data;
+            lockCount = (uintptr_t)tls_get_direct(SYNC_COUNT_DIRECT_KEY);
+            if (result->threadCount <= 0  ||  lockCount <= 0) {
+                _objc_fatal("id2data fastcache is buggy");
+            }
+
+            switch(why) {
+            case ACQUIRE: {
+                lockCount++;
+                tls_set_direct(SYNC_COUNT_DIRECT_KEY, (void*)lockCount);
+                break;
+            }
+            case RELEASE:
+                lockCount--;
+                tls_set_direct(SYNC_COUNT_DIRECT_KEY, (void*)lockCount);
+                if (lockCount == 0) {
+                    // remove from fast cache
+                    tls_set_direct(SYNC_DATA_DIRECT_KEY, NULL);
+                    // atomic because may collide with concurrent ACQUIRE
+                    OSAtomicDecrement32Barrier(&result->threadCount);
+                }
+                break;
+            case CHECK:
+                // do nothing
+                break;
+            }
+
+            return result;
+        }
+    }
+#endif
+
+    // Check per-thread cache of already-owned locks for matching object
+    SyncCache *cache = fetch_cache(NO);
+    if (cache) {
+        unsigned int i;
+        for (i = 0; i < cache->used; i++) {
+            SyncCacheItem *item = &cache->list[i];
+            if (item->data->object != object) continue;
+
+            // Found a match.
+            result = item->data;
+            if (result->threadCount <= 0  ||  item->lockCount <= 0) {
+                _objc_fatal("id2data cache is buggy");
+            }
+                
+            switch(why) {
+            case ACQUIRE:
+                item->lockCount++;
+                break;
+            case RELEASE:
+                item->lockCount--;
+                if (item->lockCount == 0) {
+                    // remove from per-thread cache
+                    cache->list[i] = cache->list[--cache->used];
+                    // atomic because may collide with concurrent ACQUIRE
+                    OSAtomicDecrement32Barrier(&result->threadCount);
+                }
+                break;
+            case CHECK:
+                // do nothing
+                break;
+            }
+
+            return result;
+        }
+    }
+
+    // Thread cache didn't find anything.
+    // Walk in-use list looking for matching object
+    // Spinlock prevents multiple threads from creating multiple 
+    // locks for the same new object.
+    // We could keep the nodes in some hash table if we find that there are
+    // more than 20 or so distinct locks active, but we don't do that now.
+    
+    lockp->lock();
+
+    {
+        SyncData* p;
+        SyncData* firstUnused = NULL;
+        for (p = *listp; p != NULL; p = p->nextData) {
+            if ( p->object == object ) {
+                result = p;
+                // atomic because may collide with concurrent RELEASE
+                OSAtomicIncrement32Barrier(&result->threadCount);
+                goto done;
+            }
+            if ( (firstUnused == NULL) && (p->threadCount == 0) )
+                firstUnused = p;
+        }
+    
+        // no SyncData currently associated with object
+        if ( (why == RELEASE) || (why == CHECK) )
+            goto done;
+    
+        // an unused one was found, use it
+        if ( firstUnused != NULL ) {
+            result = firstUnused;
+            result->object = (objc_object *)object;
+            result->threadCount = 1;
+            goto done;
+        }
+    }
+
+    // malloc a new SyncData and add to list.
+    // XXX calling malloc with a global lock held is bad practice,
+    // might be worth releasing the lock, mallocing, and searching again.
+    // But since we never free these guys we won't be stuck in malloc very often.
+    result = (SyncData*)calloc(sizeof(SyncData), 1);
+    result->object = (objc_object *)object;
+    result->threadCount = 1;
+    new (&result->mutex) recursive_mutex_t();
+    result->nextData = *listp;
+    *listp = result;
+    
+ done:
+    lockp->unlock();
+    if (result) {
+        // Only new ACQUIRE should get here.
+        // All RELEASE and CHECK and recursive ACQUIRE are 
+        // handled by the per-thread caches above.
+        if (why == RELEASE) {
+            // Probably some thread is incorrectly exiting 
+            // while the object is held by another thread.
+            return nil;
+        }
+        if (why != ACQUIRE) _objc_fatal("id2data is buggy");
+        if (result->object != object) _objc_fatal("id2data is buggy");
+
+#if SUPPORT_DIRECT_THREAD_KEYS
+        if (!fastCacheOccupied) {
+            // Save in fast thread cache
+            tls_set_direct(SYNC_DATA_DIRECT_KEY, result);
+            tls_set_direct(SYNC_COUNT_DIRECT_KEY, (void*)1);
+        } else 
+#endif
+        {
+            // Save in thread cache
+            if (!cache) cache = fetch_cache(YES);
+            cache->list[cache->used].data = result;
+            cache->list[cache->used].lockCount = 1;
+            cache->used++;
+        }
+    }
+
+    return result;
+}
+
+```
 
 **objc-sync.mm**
 
@@ -163,6 +333,16 @@ static StripedMap<SyncList> sDataLists;
 
 ```
 
-在上面代码中`SyncData* data = id2data(obj, ACQUIRE);`的方法里面根据`obj`参数来查找Cache对象`SyncCache`, 当然没有命中cache的时候会创建并存cache。
+从代码中可以看出过程:
+
+1. 首先若支持`SUPPORT_DIRECT_THREAD_KEYS`,则会去查找缓存的`SyncData`,如果找到cache,则根据`why`参数来更新缓存,否则继续。(这个选项的意思是将SyncData快速缓存在内存中, 类似`NSUserdefault`的用法,使用固定的`Key`去取cache。当然,这里使用了Linux内核的cache**`address_space`**,在[这里](http://elixir.free-electrons.com/linux/latest/source/include/linux/fs.h)有代码,也可以看[参考资料](http://www.ilinuxkernel.com/files/Linux.Kernel.Cache.pdf))
+2. 接下来继续在根据`Thread`存储的缓存对象`SyncCache`进行更新,`SyncCache`是存储在`_objc_pthread_data`这个线程缓存数据结构中的。
+
+来看一下`SyncData`数据结构。
+
+
 
 请注意`static StripedMap<SyncList> sDataLists;`这个全局变量, 这里面就存放了针对线程进行加锁的数据。
+
+
+使用了`os_unfair_lock`互斥锁(这里老版本runtime使用的是`OSSpinLock`自旋锁)
