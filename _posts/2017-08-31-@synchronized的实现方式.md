@@ -1,4 +1,3 @@
-## @synchronized
 
 在iOS开发中如果我们想对一个对象进行安全的访问操作,为了避免多线程访问造成的错误,首先我们想到的是使用`NSLock`进行加锁操作.有这样一个类:
 
@@ -335,8 +334,18 @@ static StripedMap<SyncList> sDataLists;
 
 从代码中可以看出过程:
 
-1. 首先若支持`SUPPORT_DIRECT_THREAD_KEYS`,则会去查找缓存的`SyncData`,如果找到cache,则根据`why`参数来更新缓存,否则继续。(这个选项的意思是将SyncData快速缓存在内存中, 类似`NSUserdefault`的用法,使用固定的`Key`去取cache。当然,这里使用了Linux内核的cache**`address_space`**,在[这里](http://elixir.free-electrons.com/linux/latest/source/include/linux/fs.h)有代码,也可以看[参考资料](http://www.ilinuxkernel.com/files/Linux.Kernel.Cache.pdf))
-2. 接下来继续在根据`Thread`存储的缓存对象`SyncCache`进行更新,`SyncCache`是存储在`_objc_pthread_data`这个线程缓存数据结构中的。
+- 注意`static StripedMap<SyncList> sDataLists`这个属性,里面存储了全局的针对每一个需要加锁的对象对应的锁数据结构, `StripedMap`会根据传入的对象的内存地址来映射对应的数据结构,这里会对内存地址进行移位运算后使用.这是个全局静态属性,保证了每个线程访问都有效.
+
+1. 首先若支持`SUPPORT_DIRECT_THREAD_KEYS`,这种情况下只会用到`SyncData`这个数据,不停的更新它就可以了.	
+	- 先会去查找缓存的`SyncData`,如果找到cache,则根据`why`参数来更新缓存数据的`lockCount`字段,表示有多少个线程等待这个锁
+	- 否则继续执行, 查找线程缓存
+	- 最后使用`SyncData`的`pthread_mutex_t`进行加锁, [ `pthread_mutex_t` 的初始化方法定义](http://www.skrenta.com/rt/man/pthread_mutex_init.3.html), 这里使用了**嵌套锁**
+
+	> 这个选项的意思是将SyncData快速缓存在内存中, 类似`NSUserdefault`的用法,使用固定的`Key`去取cache。当然,这里使用了Linux内核的cache**`address_space`**,在[这里](http://elixir.free-electrons.com/linux/latest/source/include/linux/fs.h)有代码,也可以看[参考资料](http://www.ilinuxkernel.com/files/Linux.Kernel.Cache.pdf)
+	
+2. 若未找到快速线程缓存,接下来继续在根据`Thread`存储的缓存对象`SyncCache`进行更新,`SyncCache`是存储在`_objc_pthread_data`这个线程缓存数据结构中的。在`SyncCache`中的`list`属性保存了`SyncData`数据,`list`属性中的每一个对象代表一个需要被保护的对象,就如上面代码中的`@synchronized (self)`的`self`对象.若为找到缓存,继续
+3. 使用`SyncList`里面的`spinlock_t`锁去加锁,即使用了`os_unfair_lock`互斥锁加锁,防止多线程同时访问为一个对象创建多个cache数据
+4. 
 
 来看一下`SyncData`数据结构。
 
@@ -346,3 +355,6 @@ static StripedMap<SyncList> sDataLists;
 
 
 使用了`os_unfair_lock`互斥锁(这里老版本runtime使用的是`OSSpinLock`自旋锁)
+
+
+![](img/_objc_pthread_data.png)
