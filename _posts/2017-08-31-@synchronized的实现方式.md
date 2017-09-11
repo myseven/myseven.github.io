@@ -357,4 +357,4 @@ static StripedMap<SyncList> sDataLists;
 使用了`os_unfair_lock`互斥锁(这里老版本runtime使用的是`OSSpinLock`自旋锁)
 
 
-![图片](/images/_objc_pthread_data.png)
+![objc_pthread_data.png]({{site.baseurl}}/images/objc_pthread_data.png)
