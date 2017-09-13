@@ -334,9 +334,9 @@ static StripedMap<SyncList> sDataLists;
 
 
 **先来看一下涉及到的数据结构**
-![objc_pthread_data数据结构](../images/objc_pthread_data.png)
-![stripMap数据结构](../images/stripMap.png)
 
+![objc_pthread_data.png]({{site.baseurl}}/images/objc_pthread_data.png)
+![stripMap.png]({{site.baseurl}}/images/stripMap.png)
 
 从代码中可以看出过程:
 
