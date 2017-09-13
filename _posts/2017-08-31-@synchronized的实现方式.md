@@ -359,7 +359,8 @@ static StripedMap<SyncList> sDataLists;
 
 
 通过查看源码,能大体了解了加锁过程和如何使用了缓存的机制来提高性能,下面简述一下整体流程
-![流程](../images/sync_cache_data.png)
+
+![sync_cache_data.png]({{site.baseurl}}/images/sync_cache_data.png)
 
 1. 为A对象添加`@synchronized`方法
 2. 调用`objc_sync_enter`方法
@@ -368,5 +369,4 @@ static StripedMap<SyncList> sDataLists;
 5. 找到缓存对象后返回`SyncData`
 6. 使用`SyncData`的`pthread_mutex_t`嵌套锁加锁
 7. 对A对象操作完之后调用`objc_sync_exit`加锁操作
-
 
