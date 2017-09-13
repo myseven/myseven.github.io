@@ -332,6 +332,12 @@ static StripedMap<SyncList> sDataLists;
 
 ```
 
+
+**先来看一下涉及到的数据结构**
+![objc_pthread_data数据结构](../images/objc_pthread_data.png)
+![stripMap数据结构](../images/stripMap.png)
+
+
 从代码中可以看出过程:
 
 - 注意`static StripedMap<SyncList> sDataLists`这个属性,里面存储了全局的针对每一个需要加锁的对象对应的锁数据结构, `StripedMap`会根据传入的对象的内存地址来映射对应的数据结构,这里会对内存地址进行移位运算后使用.这是个全局静态属性,保证了每个线程访问都有效.
@@ -341,21 +347,26 @@ static StripedMap<SyncList> sDataLists;
 	- 否则继续执行, 查找线程缓存
 	- 最后使用`SyncData`的`pthread_mutex_t`进行加锁, [ `pthread_mutex_t` 的初始化方法定义](http://www.skrenta.com/rt/man/pthread_mutex_init.3.html), 这里使用了**嵌套锁**
 
-	> 这个选项的意思是将SyncData快速缓存在内存中, 类似`NSUserdefault`的用法,使用固定的`Key`去取cache。当然,这里使用了Linux内核的cache**`address_space`**,在[这里](http://elixir.free-electrons.com/linux/latest/source/include/linux/fs.h)有代码,也可以看[参考资料](http://www.ilinuxkernel.com/files/Linux.Kernel.Cache.pdf)
+	> 这个选项的意思是将SyncData快速缓存在内存中,为什么说是快缓存呢? 我认为因为它只用了一个`SyncData`对象来做缓存,通过`lockCount`字段刷新缓存, 相比较下面的单链表缓存方式要快,单链表要有查表的开销. 它的存储方式类似`NSUserdefault`的用法,使用固定的`Key`去取cache。当然,这里使用了Linux内核的cache**`address_space`**,在[这里](http://elixir.free-electrons.com/linux/latest/source/include/linux/fs.h)有代码,也可以看[参考资料](http://www.ilinuxkernel.com/files/Linux.Kernel.Cache.pdf)
 	
-2. 若未找到快速线程缓存,接下来继续在根据`Thread`存储的缓存对象`SyncCache`进行更新,`SyncCache`是存储在`_objc_pthread_data`这个线程缓存数据结构中的。在`SyncCache`中的`list`属性保存了`SyncData`数据,`list`属性中的每一个对象代表一个需要被保护的对象,就如上面代码中的`@synchronized (self)`的`self`对象.若为找到缓存,继续
-3. 使用`SyncList`里面的`spinlock_t`锁去加锁,即使用了`os_unfair_lock`互斥锁加锁,防止多线程同时访问为一个对象创建多个cache数据
-4. 
+2. 若未找到快速线程缓存,接下来继续在根据`Thread`存储的缓存对象`SyncCache`进行更新,`SyncCache`是存储在`_objc_pthread_data`这个线程缓存数据结构中的。在`SyncCache`中的`list`属性保存了`SyncData`数据,`list`属性中的每一个对象代表一个需要被保护的对象,就如上面代码中的`@synchronized (self)`的`self`对象,每个线程都有一个`SyncCache`,但是同一个对象只有一份对象,保存在某一个线程的`SyncCache`中, 这个机制是由全局的`sDataLists`来保证的.若没有找到缓存,则继续
+3. 开始创建`SyncData`对象, 在创建之前,使用`SyncList`里面的`spinlock_t`锁去加锁,即使用了`os_unfair_lock`互斥锁加锁(这里老版本runtime使用的是`OSSpinLock`自旋锁),防止多线程同时访问为一个对象创建多个cache数据.
+4. 将创建的`SyncData`对象存快速线程缓存和线程缓存中.供下次使用来更新里面的数据.
+5. 当外部`objc_sync_enter`方法获取到`SyncData`数据后, 直接使用了`pthread_mutex_t`的嵌套锁来加锁,进行多线程访问的保护操作
+6. 当外部操作完后,调用了`objc_sync_exit`方法解锁,内部实现也很简单, 和加锁步骤一样,先找到这个对象对应的`SyncData`数据,然后将嵌套锁解锁,更新数据(更新这个数据被线程使用的个数和加锁次数)
 
-来看一下`SyncData`数据结构。
-
-
-
-请注意`static StripedMap<SyncList> sDataLists;`这个全局变量, 这里面就存放了针对线程进行加锁的数据。
+>请注意`static StripedMap<SyncList> sDataLists;`这个全局变量, 这里面就存放了针对线程进行加锁的数据的指针。
 
 
-使用了`os_unfair_lock`互斥锁(这里老版本runtime使用的是`OSSpinLock`自旋锁)
+通过查看源码,能大体了解了加锁过程和如何使用了缓存的机制来提高性能,下面简述一下整体流程
+![流程](../images/sync_cache_data.png)
 
+1. 为A对象添加`@synchronized`方法
+2. 调用`objc_sync_enter`方法
+3. 若使用快速线程缓存,则都在快速线程缓存中存取
+4. 若未使用快速线程缓存,则使用线程内部缓存,每个线程都有一个`SyncCache`缓存对象,存储被保护对象,但是同一个对象只能在某一个线程内部缓存中存储, 由全局的`sDataLists`数组存储这个所有被保护对象对应的`SyncData`数据内存地址,来找到它进行更新,更新的前后会使用`os_unfair_lock`互斥锁加锁
+5. 找到缓存对象后返回`SyncData`
+6. 使用`SyncData`的`pthread_mutex_t`嵌套锁加锁
+7. 对A对象操作完之后调用`objc_sync_exit`加锁操作
 
-![objc_pthread_data.png](../images/objc_pthread_data.png)
 
