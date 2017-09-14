@@ -24,4 +24,4 @@ github_username:  myseven
 
 # Build settings
 markdown: kramdown
-theme: minima
+theme: minimal-mistakes-jekyll
