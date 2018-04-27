@@ -26,6 +26,11 @@ github_username:  myseven
 markdown: kramdown
 # theme: minimal-mistakes-jekyll
 
-theme:      tale
-permalink:  /:year-:month-:day/:title
-paginate:   5
+remote_theme: chesterhow/tale
+
+permalink:    /:year-:month-:day/:title
+paginate:     5
+
+plugins:
+  - jekyll-paginate
+  - jekyll-remote-theme
