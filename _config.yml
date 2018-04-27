@@ -24,5 +24,8 @@ github_username:  myseven
 
 # Build settings
 markdown: kramdown
-theme: minimal-mistakes-jekyll
+# theme: minimal-mistakes-jekyll
 
+theme:      tale
+permalink:  /:year-:month-:day/:title
+paginate:   5
