@@ -3,7 +3,7 @@
 
 **ThreadSafeQueue.m**
 
-```objective-c
+```obj-c
 @interface ThreadSafeQueue()
 @property (nonatomic, assign) NSInteger sum;
 @property (nonatomic, strong) NSLock *lock;
@@ -29,7 +29,7 @@
 
 这样可以避免多线程访问问题,另外我们也经常使用`@synchronized`关键字来简化这样的操作,例如:
 
-```objective-c
+```obj-c
 - (void)add:(NSInteger)num {
     @synchronized (self) {
         _sum += num;
@@ -361,7 +361,7 @@ static StripedMap<SyncList> sDataLists;
 
 通过查看源码,能大体了解了加锁过程和如何使用了缓存的机制来提高性能,下面简述一下整体流程
 
-![sync_cache_data.png]({{site.baseurl}}/images/sync_cache_data.png)
+![sync_cache_data.png](../images/sync_cache_data.png)
 
 1. 为A对象添加`@synchronized`方法
 2. 调用`objc_sync_enter`方法

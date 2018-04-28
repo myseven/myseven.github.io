@@ -1,8 +1,6 @@
-## Cocoapods源码解析
-
 iOS开发者多少都使用过`cocoapods`来管理第三方依赖, 这里就对`cocoapods`的源码分析一下, 深入观察它是如何管理第三方依赖包的?
 
-### DSL
+## DSL
 
 要了解Cocoapods的源码, 首先还得了解下 **领域特定语言 DSL(domain-specific languages)**
 
@@ -18,11 +16,11 @@ iOS开发者多少都使用过`cocoapods`来管理第三方依赖, 这里就对`
 
 Cocoapods的`Podfile`规范在这里 https://guides.cocoapods.org/syntax/podfile.html
 
-### Cocopods源码模块
+## Cocopods源码模块
 
 
 
-### Cocoapods源码解析
+## Cocoapods源码解析
 
 
 ![](../images/cocoapods_uml.png)
