@@ -1,11 +1,9 @@
-##Cocoapods命令行是怎么工作的?
-
 > 本篇内容工作环境在Mac OS下
 
 
 做iOS开发的同学都知道[`Cocoapods`](https://cocoapods.org/),一个非常棒的包管理工具,最常用的命令基本上就是命令行工具了, 例如: `pod init`, `pod install`, `pod update`等等.但是这些命令行工具是怎么样运行的呢? 内部执行了什么命令呢? 下面让我们一起从头开始看:
 
-###安装
+## 安装
 
 首先需要安装`Cocoapods`, 详细教程请移步[官网](https://cocoapods.org/).
 
@@ -25,7 +23,7 @@ gem安装命令:
 
 当安装完以上, 就可以直接使用`Cocoapods`命令行了, 为什么呢?
 
-### Gem的工作
+## Gem的工作
 
 当安装完`gem`和`Cocoapods`之后,查看下`Cocoapods`的安装目录:
 
@@ -62,7 +60,7 @@ gem安装命令:
 
 往下看, `gem`是如何生成`pod`命令文件的? `pod`命令行工具的命令是如何执行的呢?
 
-###.gemspec文件
+## .gemspec文件
 
 要使用`Gem`来管理`Ruby`包, 就需要编写`gemspec`文件, 来看下`cocoapods`的`gemspec`文件
 
@@ -189,7 +187,7 @@ end
 Over~
 
 
-###pod命令的工作
+## pod命令的工作
 
 但是,例如当我们执行`pod init`的时候, 又是如何工作的呢?
 
