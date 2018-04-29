@@ -71,17 +71,14 @@ CLI输入命令`pod init`
     #         command classes.
     #
     def self.parse(argv)
-      puts caller
       argv = ARGV.coerce(argv)
       cmd = argv.arguments.first
-      puts "====claide parse #{self} #{cmd}"
       if cmd && subcommand = find_subcommand(cmd)
         argv.shift_argument
         subcommand.parse(argv)
       elsif abstract_command? && default_subcommand
         load_default_subcommand(argv)
       else
-        puts "self #{self} new "
         new(argv)
       end
     end
@@ -114,19 +111,47 @@ CLI输入命令`pod init`
 
 
 ### Podfile的解析
-详细详细我们费尽按照一个规范编写了一个`Podfile`文件,那这个文件Cocoapods是怎么用的呢?
+我们费尽按照一个规范编写了一个`Podfile`文件,那这个文件Cocoapods是怎么用的呢?
 
 从上面的类图中可以看到有个类`Pod Profile DSL`,没错就是它,他是这个协议的解析者.
 
+当执行pod的命令的时候,Cocopods会读出这个文件内容,通过`eval`方法按照代码老执行文件的内容(`eval`方法下面会再聊)
+
+从上面的类图中,DSL类定义了很多方法,这些方法都是Podfile的规范里面的关键字,例如:
+在Podfile中添加了一个依赖`pod 'AFNetworking'`,在`podfile.rb`文件中执行到这一行的时候,会调用`pod`方法:
+
+```ruby
+      def pod(name = nil, *requirements)
+        unless name
+          raise StandardError, 'A dependency requires a name.'
+        end
+
+        current_target_definition.store_pod(name, *requirements)
+      end
+
+```
+可以看到这里通过`store_pod`方法将`AFNetworking`和参数一起保存到内存中的一个`Hash`中,类似的其他方法
+
+`source 'https://github.com/CocoaPods/Specs.git'`
+
+`target 'MyApp'`
+
+都会调用Podfile中的相应方法,把信息转换成对象存储下来,供之后的命令来使用.
 
 ### pod init
 
+init命令的功能就是会创建`Podfile`模板,流程比较简单如下:
 
+1. 初始化全局config,当然config是懒加载的,使用的时候才会创建
+2. 初始化`Podfile`文件目标路径
+3. 先调用`validate!`方法(这个是父类CLAide模块的Command类调用的),检查命令执行目录是否有`.xcodeproj`文件
+4. 如果找到`.xcodeproj`文件后打开这个文件读入到内存中
+5. 调用`podfile_template`方法编写`Podfile`模板文件,通过`.xcodeproj`文件获取target信息
+6. 将`Podfile`的模板文件写入目标路径
 
 ### pod install
 
-**我们先从`pod install`命令入手,这个命令执行的时候Cocoapods是如何执行的?**
-
+**`pod install`这个命令执行的时候Cocoapods是如何运作的?**
 
 `Installer`类主要负责将`Podfile`文件转换成`Pods`库,生成`.xcworkspace`工程文件,配置好第三方库的依赖, 它主要从三个文件获取配置信息:
 
@@ -161,9 +186,92 @@ CLI输入命令`pod init`
 	- 保存`.xcworkspace`文件到目录
 8. 调用`plugin`的`post_install`钩子方法
 
+**这里是如何执行读取到的`Podfile`文件内容呢?**
+这个就要说道`eval`方法了,它的作用就是将字符串内容按照代码来执行, 例如
 
+```bash
+$ eval "1+1"
+$ > 2
+```
+那在Cocoapods中真正执行`Podfile`内容的位置就在Pod模块的Podfile类中:
+
+```ruby
+# Configures a new Podfile from the given ruby string.
+    #
+    # @param  [Pathname] path
+    #         The path from which the Podfile is loaded.
+    #
+    # @param  [String] contents
+    #         The ruby string which will configure the Podfile with the DSL.
+    #
+    # @return [Podfile] the new Podfile
+    #
+    def self.from_ruby(path, contents = nil)
+        contents ||= File.open(path, 'r:utf-8', &:read)
+      # ...省略部分
+      podfile = Podfile.new(path) do
+        # rubocop:disable Lint/RescueException
+        begin
+          # rubocop:disable Eval
+          eval(contents, nil, path.to_s)
+          # rubocop:enable Eval
+        rescue Exception => e
+          message = "Invalid `#{path.basename}` file: #{e.message}"
+          raise DSLError.new(message, path, e, contents)
+        end
+        # rubocop:enable Lint/RescueException
+      end
+      podfile
+    end
+```
+
+上段代码中参数contents的内容就是从`Podfile`读出来的字符串,然后通过`eval`方法执行这段字符串
 
 ### pod update
 
+`pod update`命令就比较简单了, 内部调用了`pod install`的逻辑,唯一的区别是:
+
+**update会跳过`Podfile.lock`文件,更新所有repo源, 官方说明在[这里](https://guides.cocoapods.org/using/pod-install-vs-update.html)**
+
+在代码中是通过`update`参数控制的:
+
+Install的run方法:
+
+```ruby
+      def run
+        puts 'install file run'
+        verify_podfile_exists!
+        installer = installer_for_config
+        installer.repo_update = repo_update?(:default => false)
+        installer.update = false
+        installer.install!
+      end
+```
+
+Update的run方法:
+
+```ruby
+def run
+        verify_podfile_exists!
+
+        installer = installer_for_config
+        installer.repo_update = repo_update?(:default => true)
+        if @pods
+          verify_lockfile_exists!
+          verify_pods_are_installed!
+          installer.update = { :pods => @pods }
+        else
+          UI.puts 'Update all pods'.yellow
+          installer.update = true
+        end
+        installer.install!
+      end
+```
+
+在Pod模块的Installer类中进行判断是否进行更新所有repo源.
+
 ## 总结
 
+Cocoapods的库源代码的代码量还是比较大的, 这里只是窥视了主流程, 而且Cocoapods也拆分了很多模块到独立的Gem源,希望能让大家理解Pod指令的运行过程.
+
+另外Cocoapods的创建独立的Cocoapods源和私有Pod没有涉及到,这部分也非常有用,可以用于工程模块化开发的基础,后面再来研究.
