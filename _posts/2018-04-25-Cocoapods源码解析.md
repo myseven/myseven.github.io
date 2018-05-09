@@ -35,6 +35,7 @@ Cocoapods的`Podfile`规范在这里 https://guides.cocoapods.org/syntax/podfile
 
 > PS: 上面这些模块不都是在一个Gem源里,从Cocoapods的Gem配置文件`cocoapods.gemspec`可以看到,Cocoapods根据功能拆分了多个Gem源,做好模块化了
 
+
 ## Cocoapods源码解析
 
 源码阅读方式是从`pod init`和`pod install`两个最常用命令入手,按照执行顺序和调用关系来进行的.
@@ -105,7 +106,7 @@ CLI输入命令`pod init`
 
 敲黑板: 
 
-- CLAide模块的Command类是`claide`库中的基类,提供了方便快速的构建一套CLI的API方法,在Cocoapods中所有关于Command的类都是继承于这个类,当然,在Pod模块中的Command类中是作为Pod模块的Commmand的基类 
+- CLAide模块的Command类是`claide`库中的基类,提供了方便快速的构建一套CLI的API方法,在Cocoapods中所有关于Command的类都是继承于这个类,当然,在Pod模块中的Command类中是作为Pod模块的Command的基类 
 - 当在CLI中例如调用`pod init`的时候,会调用Pod模块中`init.rb`文件,就是图中的`Pod Init`类,其他命令同理
 - 注意`Pod Podfile DSL`这个类,它就是上面所说的Cocoapods基于Ruby自定义的一套DSL,用于解析`Podfile`内容
 
